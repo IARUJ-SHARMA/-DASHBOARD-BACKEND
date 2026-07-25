@@ -6,8 +6,8 @@ from typing import List
 from datetime import date as date_type
 
 from database import get_db
-from models import CalendarEvent, ChecklistTask, Subsystem, Consumable
-from schemas import CalendarEventOut, ChecklistTaskOut, SummaryOut, ConsumableOut
+from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare
+from schemas import CalendarEventOut, ChecklistTaskOut, SummaryOut, ConsumableOut, SpareOut
 
 app = FastAPI()
 
@@ -66,4 +66,10 @@ def get_summary(event_date: date_type, db: Session = Depends(get_db)):
 @app.get("/api/consumables", response_model=List[ConsumableOut])
 def get_consumables(db: Session = Depends(get_db)):
     items = db.query(Consumable).order_by(Consumable.consumable_item_name).all()
+    return items
+
+
+@app.get("/api/spares", response_model=List[SpareOut])
+def get_spares(db: Session = Depends(get_db)):
+    items = db.query(FixedLifeSpare).order_by(FixedLifeSpare.months_remaining).all()
     return items

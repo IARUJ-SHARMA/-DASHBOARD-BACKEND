@@ -53,3 +53,16 @@ class ConsumableOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SpareOut(BaseModel):
+    spare_id: str
+    spare_item_name: str
+    subsystem_id: Optional[str] = None
+    months_remaining: Optional[int] = None
+    status: str
+    alert_level: Optional[str] = None
+    storage_location: Optional[str] = None
+
+    class Config:
+        from_attributes = True
