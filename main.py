@@ -7,7 +7,14 @@ from datetime import date as date_type
 
 from database import get_db
 from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare
-from schemas import CalendarEventOut, ChecklistTaskOut, SummaryOut, ConsumableOut, SpareOut
+from schemas import (
+    CalendarEventOut,
+    ChecklistTaskOut,
+    SummaryOut,
+    ConsumableOut,
+    SpareOut,
+    ChecklistTaskUpdate,
+)
 
 app = FastAPI()
 
@@ -73,3 +80,24 @@ def get_consumables(db: Session = Depends(get_db)):
 def get_spares(db: Session = Depends(get_db)):
     items = db.query(FixedLifeSpare).order_by(FixedLifeSpare.months_remaining).all()
     return items
+
+
+@app.put("/api/checklist/{task_id}/status", response_model=ChecklistTaskOut)
+def update_task_status(task_id: str, update: ChecklistTaskUpdate, db: Session = Depends(get_db)):
+    task = db.query(ChecklistTask).filter(ChecklistTask.task_id == task_id).first()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    valid_statuses = {"PENDING", "IN_PROGRESS", "COMPLETE"}
+    if update.completion_status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+
+    task.completion_status = update.completion_status
+    db.commit()
+    db.refresh(task)
+
+    return task

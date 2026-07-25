@@ -29,6 +29,7 @@ class ChecklistTaskOut(BaseModel):
     video_ref_filename: Optional[str] = None
     image_ref_filename: Optional[str] = None
     mandatory_flag: Optional[str] = None
+    completion_status: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -63,6 +64,13 @@ class SpareOut(BaseModel):
     status: str
     alert_level: Optional[str] = None
     storage_location: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChecklistTaskUpdate(BaseModel):
+    completion_status: str
 
     class Config:
         from_attributes = True
