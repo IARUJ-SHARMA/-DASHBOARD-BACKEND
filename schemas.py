@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 
@@ -71,6 +71,18 @@ class SpareOut(BaseModel):
 
 class ChecklistTaskUpdate(BaseModel):
     completion_status: str
+
+    class Config:
+        from_attributes = True
+
+
+class TaskAuditLogOut(BaseModel):
+    id: int
+    task_id: str
+    old_status: Optional[str] = None
+    new_status: str
+    changed_by: Optional[str] = None
+    changed_at: datetime
 
     class Config:
         from_attributes = True

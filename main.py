@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
-from datetime import date as date_type
+from datetime import date as date_type, datetime
 
 from database import get_db
-from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare
+from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare, TaskAuditLog
 from schemas import (
     CalendarEventOut,
     ChecklistTaskOut,
@@ -14,6 +14,7 @@ from schemas import (
     ConsumableOut,
     SpareOut,
     ChecklistTaskUpdate,
+    TaskAuditLogOut,
 )
 
 app = FastAPI()
@@ -96,8 +97,30 @@ def update_task_status(task_id: str, update: ChecklistTaskUpdate, db: Session = 
             detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
         )
 
+    old_status = task.completion_status
     task.completion_status = update.completion_status
+
+    log_entry = TaskAuditLog(
+        task_id=task_id,
+        old_status=old_status,
+        new_status=update.completion_status,
+        changed_by="current_user",
+        changed_at=datetime.utcnow(),
+    )
+    db.add(log_entry)
+
     db.commit()
     db.refresh(task)
 
     return task
+
+
+@app.get("/api/audit-log/{task_id}", response_model=List[TaskAuditLogOut])
+def get_task_audit_log(task_id: str, db: Session = Depends(get_db)):
+    logs = (
+        db.query(TaskAuditLog)
+        .filter(TaskAuditLog.task_id == task_id)
+        .order_by(TaskAuditLog.changed_at.desc())
+        .all()
+    )
+    return logs

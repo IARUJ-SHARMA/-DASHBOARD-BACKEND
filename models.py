@@ -8,9 +8,9 @@ class Subsystem(Base):
 
     subsystem_id = Column(String, primary_key=True)  # e.g. 'LCU', 'Rectifier'
     subsystem_full_name = Column(String)
-    pm_frequency = Column(String)          # Weekly / Monthly / Quarterly / Annual
+    pm_frequency = Column(String)            # Weekly / Monthly / Quarterly / Annual
     freq_colour_code = Column(String)      # 'Blue', 'Red', etc.
-    hex_colour = Column(String)            # '#1D4ED8'
+    hex_colour = Column(String)              # '#1D4ED8'
     est_duration_hrs = Column(Float)
     display_order = Column(Integer)
     active_flag = Column(String)
@@ -151,3 +151,14 @@ class RescheduleLog(Base):
     status = Column(String)
     timestamp = Column(DateTime)
     notes = Column(Text)
+
+
+class TaskAuditLog(Base):
+    __tablename__ = "task_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String, ForeignKey("checklist_tasks.task_id"))
+    old_status = Column(String)
+    new_status = Column(String)
+    changed_by = Column(String)
+    changed_at = Column(DateTime)
