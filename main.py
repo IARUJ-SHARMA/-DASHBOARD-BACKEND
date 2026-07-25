@@ -1,16 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
+from datetime import date as date_type
 
 from database import get_db
-from models import CalendarEvent, ChecklistTask
-from schemas import CalendarEventOut, ChecklistTaskOut
+from models import CalendarEvent, ChecklistTask, Subsystem
+from schemas import CalendarEventOut, ChecklistTaskOut, SummaryOut
 
 app = FastAPI()
 
-# Allow the React dev server (localhost:5173) to call this API.
-# Without this, the browser blocks the request as a security measure (CORS).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -42,3 +42,22 @@ def get_checklist(subsystem_id: str, db: Session = Depends(get_db)):
     if not tasks:
         raise HTTPException(status_code=404, detail="No checklist tasks found for this subsystem")
     return tasks
+
+
+@app.get("/api/summary/{event_date}", response_model=SummaryOut)
+def get_summary(event_date: date_type, db: Session = Depends(get_db)):
+    events_today = db.query(CalendarEvent).filter(CalendarEvent.event_date == event_date).all()
+
+    planned_checks_today = len(events_today)
+    estimated_maintenance_hours = sum(e.duration_hrs for e in events_today)
+    subsystems_eligible = len(set(e.subsystem_id for e in events_today))
+
+    total_subsystems = db.query(func.count(Subsystem.subsystem_id)).scalar() or 1
+    status_percentage = round((subsystems_eligible / total_subsystems) * 100)
+
+    return SummaryOut(
+        planned_checks_today=planned_checks_today,
+        estimated_maintenance_hours=estimated_maintenance_hours,
+        subsystems_eligible=subsystems_eligible,
+        status_percentage=status_percentage,
+    )

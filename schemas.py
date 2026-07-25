@@ -32,3 +32,10 @@ class ChecklistTaskOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SummaryOut(BaseModel):
+    planned_checks_today: int
+    estimated_maintenance_hours: float
+    subsystems_eligible: int
+    status_percentage: int
