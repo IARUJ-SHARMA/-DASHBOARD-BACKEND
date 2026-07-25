@@ -39,3 +39,17 @@ class SummaryOut(BaseModel):
     estimated_maintenance_hours: float
     subsystems_eligible: int
     status_percentage: int
+
+
+class ConsumableOut(BaseModel):
+    item_id: str
+    consumable_item_name: str
+    associated_subsystems: Optional[str] = None
+    unit_of_measure: Optional[str] = None
+    current_qty: Optional[float] = None
+    alert_threshold: Optional[float] = None
+    status: str
+    storage_location: Optional[str] = None
+
+    class Config:
+        from_attributes = True
