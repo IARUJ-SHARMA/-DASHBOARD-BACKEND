@@ -40,6 +40,10 @@ class SummaryOut(BaseModel):
     estimated_maintenance_hours: float
     subsystems_eligible: int
     status_percentage: int
+    low_stock_alerts: int
+    life_span_alerts: int
+    total_active_subsystems: int
+    pm_completion_rate_mtd: int
 
 
 class ConsumableOut(BaseModel):

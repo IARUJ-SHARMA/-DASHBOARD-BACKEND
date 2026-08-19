@@ -6,7 +6,7 @@ from typing import List
 from datetime import date as date_type, datetime
 
 from database import get_db
-from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare, TaskAuditLog
+from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare, TaskAuditLog, PMRecord
 from schemas import (
     CalendarEventOut,
     ChecklistTaskOut,
@@ -55,19 +55,69 @@ def get_checklist(subsystem_id: str, db: Session = Depends(get_db)):
 @app.get("/api/summary/{event_date}", response_model=SummaryOut)
 def get_summary(event_date: date_type, db: Session = Depends(get_db)):
     events_today = db.query(CalendarEvent).filter(CalendarEvent.event_date == event_date).all()
+    eligible_subsystem_ids = set(e.subsystem_id for e in events_today)
+    subsystems_eligible = len(eligible_subsystem_ids)
 
-    planned_checks_today = len(events_today)
-    estimated_maintenance_hours = sum(e.duration_hrs for e in events_today)
-    subsystems_eligible = len(set(e.subsystem_id for e in events_today))
+    # MET-001: count checklist tasks belonging to today's eligible subsystems
+    planned_checks_today = 0
+    if eligible_subsystem_ids:
+        planned_checks_today = (
+            db.query(func.count(ChecklistTask.id))
+            .filter(ChecklistTask.subsystem_id.in_(eligible_subsystem_ids))
+            .scalar() or 0
+        )
 
-    total_subsystems = db.query(func.count(Subsystem.subsystem_id)).scalar() or 1
-    status_percentage = round((subsystems_eligible / total_subsystems) * 100)
+    # MET-002: sum SUBSYSTEM_MASTER.Est_Duration_hrs for eligible subsystems (per spec, not per calendar row)
+    estimated_maintenance_hours = 0.0
+    if eligible_subsystem_ids:
+        estimated_maintenance_hours = (
+            db.query(func.sum(Subsystem.est_duration_hrs))
+            .filter(Subsystem.subsystem_id.in_(eligible_subsystem_ids))
+            .scalar() or 0.0
+        )
+
+    # MET-004: % of today's eligible tasks marked COMPLETE
+    status_percentage = 0
+    if planned_checks_today > 0:
+        completed_count = (
+            db.query(func.count(ChecklistTask.id))
+            .filter(ChecklistTask.subsystem_id.in_(eligible_subsystem_ids))
+            .filter(ChecklistTask.completion_status == "COMPLETE")
+            .scalar() or 0
+        )
+        status_percentage = round((completed_count / planned_checks_today) * 100)
+
+    # MET-005: Low Stock Alerts
+    low_stock_alerts = (
+        db.query(func.count(Consumable.id)).filter(Consumable.status == "Low Stock").scalar() or 0
+    )
+
+    # MET-006: Life Span Alerts (expired or within warning window)
+    life_span_alerts = (
+        db.query(func.count(FixedLifeSpare.id)).filter(FixedLifeSpare.status == "Low Stock").scalar() or 0
+    )
+
+    # MET-007: Total Active Subsystems
+    total_active_subsystems = (
+        db.query(func.count(Subsystem.subsystem_id)).filter(Subsystem.active_flag == "Y").scalar() or 0
+    )
+
+    # MET-008: PM Completion Rate (currently all-time, see note below)
+    total_pm_records = db.query(func.count(PMRecord.record_id)).scalar() or 0
+    completed_pm_records = (
+        db.query(func.count(PMRecord.record_id)).filter(PMRecord.overall_status == "COMPLETE").scalar() or 0
+    )
+    pm_completion_rate_mtd = round((completed_pm_records / total_pm_records) * 100) if total_pm_records > 0 else 0
 
     return SummaryOut(
         planned_checks_today=planned_checks_today,
         estimated_maintenance_hours=estimated_maintenance_hours,
         subsystems_eligible=subsystems_eligible,
         status_percentage=status_percentage,
+        low_stock_alerts=low_stock_alerts,
+        life_span_alerts=life_span_alerts,
+        total_active_subsystems=total_active_subsystems,
+        pm_completion_rate_mtd=pm_completion_rate_mtd,
     )
 
 
