@@ -63,6 +63,7 @@ class SpareOut(BaseModel):
     months_remaining: Optional[int] = None
     status: str
     alert_level: Optional[str] = None
+    replacement_action: Optional[str] = None
     storage_location: Optional[str] = None
 
     class Config:
