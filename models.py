@@ -162,3 +162,12 @@ class TaskAuditLog(Base):
     new_status = Column(String)
     changed_by = Column(String)
     changed_at = Column(DateTime)
+
+
+class UploadLog(Base):
+    __tablename__ = "upload_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    filename = Column(String)
+    uploaded_at = Column(DateTime)
+    summary = Column(Text)

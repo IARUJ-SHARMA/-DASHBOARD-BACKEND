@@ -3,33 +3,26 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from models import (
     Subsystem, ChecklistTask, Consumable,
-    FixedLifeSpare, CalendarEvent, User, PMRecord, RescheduleLog
-)
+    FixedLifeSpare, CalendarEvent, User, PMRecord, RescheduleLog)
 
 EXCEL_FILE = "RPM_Dashboard_InputData_v10.xlsx"
-
 
 def load_sheet(sheet_name: str) -> pd.DataFrame:
     df = pd.read_excel(EXCEL_FILE, sheet_name=sheet_name, skiprows=3)
     return df
 
-
 def clean_rows(df: pd.DataFrame, id_column: str) -> pd.DataFrame:
     df = df.dropna(subset=[id_column])
     return df
 
-
 def ingest_subsystems(db: Session):
     df = load_sheet("SUBSYSTEM_MASTER")
     df = clean_rows(df, "Subsystem_ID")
+    inserted, updated = 0, 0
 
     for _, row in df.iterrows():
         existing = db.get(Subsystem, row["Subsystem_ID"])
-        if existing:
-            continue
-
-        record = Subsystem(
-            subsystem_id=row["Subsystem_ID"],
+        values = dict(
             subsystem_full_name=row["Subsystem_Full_Name"],
             pm_frequency=row["PM_Frequency"],
             freq_colour_code=row["Freq_Colour_Code"],
@@ -43,25 +36,26 @@ def ingest_subsystems(db: Session):
             notes=row["Notes"],
             last_updated=row["Last_Updated"],
         )
-        db.add(record)
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(Subsystem(subsystem_id=row["Subsystem_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Subsystems ingested: {len(df)} rows processed.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_checklist_tasks(db: Session):
     df = load_sheet("CHECKLIST_TASKS")
     df = clean_rows(df, "Task_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.query(ChecklistTask).filter_by(task_id=row["Task_ID"]).first()
-        if existing:
-            continue
-
-        record = ChecklistTask(
+        values = dict(
             subsystem_id=row["Subsystem_ID"],
-            task_id=row["Task_ID"],
             step_no=row["Step_No"],
             checklist_item_short=row["Checklist_Item_Short"],
             task_title=row["Task_Title"],
@@ -73,28 +67,27 @@ def ingest_checklist_tasks(db: Session):
             image_ref_filename=row["Image_Ref_Filename"],
             mandatory_flag=row["Mandatory_Flag"],
             syrs_ref=row["SyRS_Ref"],
-            completion_status=row["Completion_Status"],
             notes=row["Notes"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(ChecklistTask(task_id=row["Task_ID"], completion_status="PENDING", **values))
+            inserted += 1
 
     db.commit()
-    print(f"Checklist tasks ingested: {count} new rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_consumables(db: Session):
     df = load_sheet("CONSUMABLES")
     df = clean_rows(df, "Item_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.query(Consumable).filter_by(item_id=row["Item_ID"]).first()
-        if existing:
-            continue
-
-        record = Consumable(
-            item_id=row["Item_ID"],
+        values = dict(
             consumable_item_name=row["Consumable_Item_Name"],
             associated_subsystems=row["Associated_Subsystems"],
             unit_of_measure=row["Unit_of_Measure"],
@@ -107,25 +100,25 @@ def ingest_consumables(db: Session):
             syrs_ref=row["SyRS_Ref"],
             notes=row["Notes"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(Consumable(item_id=row["Item_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Consumables ingested: {count} new rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_fixed_life_spares(db: Session):
     df = load_sheet("FIXED_LIFE_SPARES")
     df = clean_rows(df, "Spare_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.query(FixedLifeSpare).filter_by(spare_id=row["Spare_ID"]).first()
-        if existing:
-            continue
-
-        record = FixedLifeSpare(
-            spare_id=row["Spare_ID"],
+        values = dict(
             spare_item_name=row["Spare_Item_Name"],
             subsystem_id=row["Subsystem_ID"],
             total_life_months=row["Total_Life_Months"],
@@ -139,23 +132,30 @@ def ingest_fixed_life_spares(db: Session):
             syrs_ref=row["SyRS_Ref"],
             replacement_action=row["Replacement_Action"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(FixedLifeSpare(spare_id=row["Spare_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Fixed life spares ingested: {count} new rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_calendar_events(db: Session):
     df = load_sheet("CALENDAR_EVENTS")
     df = clean_rows(df, "Subsystem_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
-        record = CalendarEvent(
-            event_date=row["Event_Date"],
+        existing = (
+            db.query(CalendarEvent)
+            .filter_by(event_date=row["Event_Date"], subsystem_id=row["Subsystem_ID"])
+            .first()
+        )
+        values = dict(
             day_of_week=row["Day_of_Week"],
-            subsystem_id=row["Subsystem_ID"],
             subsystem_name=row["Subsystem_Name"],
             pm_frequency=row["PM_Frequency"],
             colour_code=row["Colour_Code"],
@@ -163,25 +163,25 @@ def ingest_calendar_events(db: Session):
             calendar_label=row["Calendar_Label"],
             notes=row["Notes"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(CalendarEvent(event_date=row["Event_Date"], subsystem_id=row["Subsystem_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Calendar events ingested: {count} rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_users(db: Session):
     df = load_sheet("USERS_RBAC")
     df = clean_rows(df, "User_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.query(User).filter_by(user_id=row["User_ID"]).first()
-        if existing:
-            continue
-
-        record = User(
-            user_id=row["User_ID"],
+        values = dict(
             full_name=row["Full_Name"],
             role=row["Role"],
             permissions=row["Permissions"],
@@ -191,25 +191,25 @@ def ingest_users(db: Session):
             expiry_date=row["Expiry_Date"],
             notes=row["Notes"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(User(user_id=row["User_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Users ingested: {count} new rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_pm_records(db: Session):
     df = load_sheet("PM_RECORDS")
     df = clean_rows(df, "Record_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.get(PMRecord, row["Record_ID"])
-        if existing:
-            continue
-
-        record = PMRecord(
-            record_id=row["Record_ID"],
+        values = dict(
             pm_date=row["PM_Date"],
             subsystem_id=row["Subsystem_ID"],
             technician_id=row["Technician_ID"],
@@ -224,25 +224,25 @@ def ingest_pm_records(db: Session):
             audit_timestamp=row["Audit_Timestamp"],
             syrs_ref=row["SyRS_Ref"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(PMRecord(record_id=row["Record_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"PM records ingested: {count} new rows.")
-
+    return {"inserted": inserted, "updated": updated}
 
 def ingest_reschedule_log(db: Session):
     df = load_sheet("RESCHEDULE_LOG")
     df = clean_rows(df, "Log_ID")
+    inserted, updated = 0, 0
 
-    count = 0
     for _, row in df.iterrows():
         existing = db.get(RescheduleLog, row["Log_ID"])
-        if existing:
-            continue
-
-        record = RescheduleLog(
-            log_id=row["Log_ID"],
+        values = dict(
             subsystem_id=row["Subsystem_ID"],
             original_date=row["Original_Date"],
             new_date=row["New_Date"],
@@ -253,23 +253,35 @@ def ingest_reschedule_log(db: Session):
             timestamp=row["Timestamp"],
             notes=row["Notes"],
         )
-        db.add(record)
-        count += 1
+        if existing:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(RescheduleLog(log_id=row["Log_ID"], **values))
+            inserted += 1
 
     db.commit()
-    print(f"Reschedule log ingested: {count} new rows.")
+    return {"inserted": inserted, "updated": updated}
 
+def run_full_ingestion(db: Session) -> dict:
+    """Runs every ingestion function and returns a combined summary."""
+    return {
+        "subsystems": ingest_subsystems(db),
+        "checklist_tasks": ingest_checklist_tasks(db),
+        "consumables": ingest_consumables(db),
+        "fixed_life_spares": ingest_fixed_life_spares(db),
+        "calendar_events": ingest_calendar_events(db),
+        "users": ingest_users(db),
+        "pm_records": ingest_pm_records(db),
+        "reschedule_log": ingest_reschedule_log(db),
+    }
 
 if __name__ == "__main__":
     db = SessionLocal()
     try:
-        ingest_subsystems(db)
-        ingest_checklist_tasks(db)
-        ingest_consumables(db)
-        ingest_fixed_life_spares(db)
-        ingest_calendar_events(db)
-        ingest_users(db)
-        ingest_pm_records(db)
-        ingest_reschedule_log(db)
+        summary = run_full_ingestion(db)
+        for sheet, counts in summary.items():
+            print(f"{sheet}: {counts['inserted']} inserted, {counts['updated']} updated")
     finally:
         db.close()

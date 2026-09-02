@@ -91,3 +91,41 @@ class TaskAuditLogOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UploadResultOut(BaseModel):
+    filename: str
+    uploaded_at: datetime
+    summary: dict
+
+
+class LastUpdateOut(BaseModel):
+    filename: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+
+
+class EligibilityOut(BaseModel):
+    subsystem_id: str
+    subsystem_full_name: str
+    pm_frequency: str
+    est_duration_hrs: float
+
+    class Config:
+        from_attributes = True
+
+
+class RescheduleRequest(BaseModel):
+    subsystem_id: str
+    original_date: date
+    new_date: date
+    reason: str
+
+
+class RescheduleResultOut(BaseModel):
+    log_id: str
+    original_date: date
+    new_date: date
+    status: str
+
+    class Config:
+        from_attributes = True

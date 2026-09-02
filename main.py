@@ -1,12 +1,19 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 from datetime import date as date_type, datetime
+import shutil
+import json
+import io
+
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 from database import get_db
-from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare, TaskAuditLog, PMRecord
+from models import CalendarEvent, ChecklistTask, Subsystem, Consumable, FixedLifeSpare, TaskAuditLog, PMRecord, UploadLog, RescheduleLog
 from schemas import (
     CalendarEventOut,
     ChecklistTaskOut,
@@ -15,7 +22,13 @@ from schemas import (
     SpareOut,
     ChecklistTaskUpdate,
     TaskAuditLogOut,
+    UploadResultOut,
+    LastUpdateOut,
+    EligibilityOut,
+    RescheduleRequest,
+    RescheduleResultOut
 )
+from ingest import run_full_ingestion
 
 app = FastAPI()
 
@@ -121,6 +134,90 @@ def get_summary(event_date: date_type, db: Session = Depends(get_db)):
     )
 
 
+@app.get("/api/eligibility/{event_date}", response_model=List[EligibilityOut])
+def get_eligibility(event_date: date_type, db: Session = Depends(get_db)):
+    events_today = db.query(CalendarEvent).filter(CalendarEvent.event_date == event_date).all()
+    eligible_ids = list(set(e.subsystem_id for e in events_today))
+
+    if not eligible_ids:
+        return []
+
+    subsystems = db.query(Subsystem).filter(Subsystem.subsystem_id.in_(eligible_ids)).all()
+    return subsystems
+
+
+@app.post("/api/reschedule", response_model=RescheduleResultOut)
+def reschedule_pm(request: RescheduleRequest, db: Session = Depends(get_db)):
+    event = (
+        db.query(CalendarEvent)
+        .filter(CalendarEvent.subsystem_id == request.subsystem_id, CalendarEvent.event_date == request.original_date)
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="No scheduled event found for that subsystem/date")
+    
+    event.event_date = request.new_date
+    count = db.query(func.count(RescheduleLog.log_id)).scalar() or 0
+    new_log_id = f"RSC-{count + 1:03d}"
+    
+    log_entry = RescheduleLog(
+        log_id=new_log_id,
+        subsystem_id=request.subsystem_id,
+        original_date=request.original_date,
+        new_date=request.new_date,
+        reason_for_rescheduling=request.reason,
+        requested_by="current_user",
+        status="APPROVED",
+        timestamp=datetime.utcnow(),
+    )
+    db.add(log_entry)
+    db.commit()
+    
+    return RescheduleResultOut(
+        log_id=new_log_id, 
+        original_date=request.original_date, 
+        new_date=request.new_date, 
+        status="APPROVED"
+    )
+
+
+@app.get("/api/export/{event_date}")
+def export_plan_pdf(event_date: date_type, db: Session = Depends(get_db)):
+    events_today = db.query(CalendarEvent).filter(CalendarEvent.event_date == event_date).all()
+    eligible_ids = list(set(e.subsystem_id for e in events_today))
+    subsystems = db.query(Subsystem).filter(Subsystem.subsystem_id.in_(eligible_ids)).all()
+    
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    y = 750
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(50, y, f"RPM Dashboard — Maintenance Plan for {event_date}")
+    y -= 40
+    
+    for sub in subsystems:
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, y, f"{sub.subsystem_full_name} ({sub.pm_frequency}) — {sub.est_duration_hrs}h")
+        y -= 20
+        tasks = db.query(ChecklistTask).filter(ChecklistTask.subsystem_id == sub.subsystem_id).order_by(ChecklistTask.step_no).all()
+        p.setFont("Helvetica", 10)
+        for task in tasks:
+            p.drawString(70, y, f"{task.step_no}. {task.task_title} ({task.approx_time_min} min)")
+            y -= 15
+            if y < 50:
+                p.showPage()
+                y = 750
+        y -= 15
+        
+    p.save()
+    buffer.seek(0)
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=maintenance_plan_{event_date}.pdf"},
+    )
+
+
 @app.get("/api/consumables", response_model=List[ConsumableOut])
 def get_consumables(db: Session = Depends(get_db)):
     items = db.query(Consumable).order_by(Consumable.consumable_item_name).all()
@@ -174,3 +271,40 @@ def get_task_audit_log(task_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return logs
+
+
+@app.post("/api/admin/upload-excel", response_model=UploadResultOut)
+def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+
+    save_path = "RPM_Dashboard_InputData_v10.xlsx"
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        summary = run_full_ingestion(db)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Failed to process Excel file: {str(e)}")
+
+    log_entry = UploadLog(
+        filename=file.filename,
+        uploaded_at=datetime.utcnow(),
+        summary=json.dumps(summary),
+    )
+    db.add(log_entry)
+    db.commit()
+
+    return UploadResultOut(
+        filename=file.filename,
+        uploaded_at=log_entry.uploaded_at,
+        summary=summary,
+    )
+
+
+@app.get("/api/admin/last-update", response_model=LastUpdateOut)
+def get_last_update(db: Session = Depends(get_db)):
+    latest = db.query(UploadLog).order_by(UploadLog.uploaded_at.desc()).first()
+    if not latest:
+        return LastUpdateOut(filename=None, uploaded_at=None)
+    return LastUpdateOut(filename=latest.filename, uploaded_at=latest.uploaded_at)
