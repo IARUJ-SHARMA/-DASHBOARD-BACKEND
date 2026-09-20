@@ -26,7 +26,8 @@ from schemas import (
     LastUpdateOut,
     EligibilityOut,
     RescheduleRequest,
-    RescheduleResultOut
+    RescheduleResultOut,
+    GatekeepingOut
 )
 from ingest import run_full_ingestion
 
@@ -34,7 +35,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5175"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -228,6 +229,30 @@ def get_consumables(db: Session = Depends(get_db)):
 def get_spares(db: Session = Depends(get_db)):
     items = db.query(FixedLifeSpare).order_by(FixedLifeSpare.months_remaining).all()
     return items
+
+
+def subsystem_matches(associated: str, subsystem_id: str) -> bool:
+    """Handles exact matches, '/'-separated lists, 'All', and prefix matches
+    (e.g. 'DG' matching 'DG_GEN') found in the real Consumables data."""
+    if not associated:
+        return False
+    if associated.strip() == "All":
+        return True
+    tokens = [t.strip() for t in associated.split("/")]
+    for token in tokens:
+        if token == subsystem_id or subsystem_id.startswith(token):
+            return True
+    return False
+
+
+@app.get("/api/gatekeeping/{subsystem_id}", response_model=GatekeepingOut)
+def get_gatekeeping(subsystem_id: str, db: Session = Depends(get_db)):
+    low_stock = db.query(Consumable).filter(Consumable.status == "Low Stock").all()
+    matched = [c.consumable_item_name for c in low_stock if subsystem_matches(c.associated_subsystems, subsystem_id)]
+    return GatekeepingOut(
+        has_warning=len(matched) > 0,
+        low_stock_items=matched,
+    )
 
 
 @app.put("/api/checklist/{task_id}/status", response_model=ChecklistTaskOut)

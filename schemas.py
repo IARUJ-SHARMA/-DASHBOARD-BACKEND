@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 
 
 class CalendarEventOut(BaseModel):
@@ -126,6 +126,14 @@ class RescheduleResultOut(BaseModel):
     original_date: date
     new_date: date
     status: str
+
+    class Config:
+        from_attributes = True
+
+
+class GatekeepingOut(BaseModel):
+    has_warning: bool
+    low_stock_items: List[str]
 
     class Config:
         from_attributes = True
