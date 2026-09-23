@@ -46,6 +46,14 @@ class SummaryOut(BaseModel):
     pm_completion_rate_mtd: int
 
 
+class MonthlySummaryOut(BaseModel):
+    pending_tasks: int
+    total_tasks: int
+    estimated_maintenance_hours: float
+    subsystems_eligible: int
+    status_percentage: int
+
+
 class ConsumableOut(BaseModel):
     item_id: str
     consumable_item_name: str

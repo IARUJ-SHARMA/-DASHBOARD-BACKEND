@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, extract
 from typing import List
 from datetime import date as date_type, datetime
 import shutil
@@ -18,6 +18,7 @@ from schemas import (
     CalendarEventOut,
     ChecklistTaskOut,
     SummaryOut,
+    MonthlySummaryOut,
     ConsumableOut,
     SpareOut,
     ChecklistTaskUpdate,
@@ -116,7 +117,7 @@ def get_summary(event_date: date_type, db: Session = Depends(get_db)):
         db.query(func.count(Subsystem.subsystem_id)).filter(Subsystem.active_flag == "Y").scalar() or 0
     )
 
-    # MET-008: PM Completion Rate (currently all-time, see note below)
+    # MET-008: PM Completion Rate
     total_pm_records = db.query(func.count(PMRecord.record_id)).scalar() or 0
     completed_pm_records = (
         db.query(func.count(PMRecord.record_id)).filter(PMRecord.overall_status == "COMPLETE").scalar() or 0
@@ -132,6 +133,40 @@ def get_summary(event_date: date_type, db: Session = Depends(get_db)):
         life_span_alerts=life_span_alerts,
         total_active_subsystems=total_active_subsystems,
         pm_completion_rate_mtd=pm_completion_rate_mtd,
+    )
+
+
+@app.get("/api/summary/month/{year}/{month}", response_model=MonthlySummaryOut)
+def get_monthly_summary(year: int, month: int, db: Session = Depends(get_db)):
+    events_this_month = (
+        db.query(CalendarEvent)
+        .filter(extract('year', CalendarEvent.event_date) == year)
+        .filter(extract('month', CalendarEvent.event_date) == month)
+        .all()
+    )
+    subsystem_ids = list(set(e.subsystem_id for e in events_this_month))
+    subsystems_eligible = len(subsystem_ids)
+    if not subsystem_ids:
+        return MonthlySummaryOut(
+            pending_tasks=0, total_tasks=0, estimated_maintenance_hours=0.0,
+            subsystems_eligible=0, status_percentage=0,
+        )
+    tasks = db.query(ChecklistTask).filter(ChecklistTask.subsystem_id.in_(subsystem_ids)).all()
+    total_tasks = len(tasks)
+    completed_tasks = len([t for t in tasks if t.completion_status == "COMPLETE"])
+    pending_tasks = total_tasks - completed_tasks
+    estimated_maintenance_hours = (
+        db.query(func.sum(Subsystem.est_duration_hrs))
+        .filter(Subsystem.subsystem_id.in_(subsystem_ids))
+        .scalar() or 0.0
+    )
+    status_percentage = round((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
+    return MonthlySummaryOut(
+        pending_tasks=pending_tasks,
+        total_tasks=total_tasks,
+        estimated_maintenance_hours=estimated_maintenance_hours,
+        subsystems_eligible=subsystems_eligible,
+        status_percentage=status_percentage,
     )
 
 
@@ -232,8 +267,6 @@ def get_spares(db: Session = Depends(get_db)):
 
 
 def subsystem_matches(associated: str, subsystem_id: str) -> bool:
-    """Handles exact matches, '/'-separated lists, 'All', and prefix matches
-    (e.g. 'DG' matching 'DG_GEN') found in the real Consumables data."""
     if not associated:
         return False
     if associated.strip() == "All":
